@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import LunchVote from './components/LunchVote.vue';
 import LadderGame from './components/LadderGame.vue';
+import HistoryCalendar from './components/HistoryCalendar.vue';
 
 const tab = ref('vote');
 </script>
@@ -11,10 +12,12 @@ const tab = ref('vote');
     <div class="tabs">
       <button :class="{ active: tab === 'vote' }" @click="tab = 'vote'">🍚 점심 투표</button>
       <button :class="{ active: tab === 'ladder' }" @click="tab = 'ladder'">☕ 커피 사다리</button>
+      <button :class="{ active: tab === 'history' }" @click="tab = 'history'">📅 기록</button>
     </div>
 
     <LunchVote v-if="tab === 'vote'" />
-    <LadderGame v-else />
+    <LadderGame v-else-if="tab === 'ladder'" />
+    <HistoryCalendar v-else />
   </div>
 </template>
 
@@ -31,14 +34,15 @@ const tab = ref('vote');
 }
 .tabs button {
   flex: 1;
-  padding: 12px 8px;
+  padding: 10px 4px;
   border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-surface);
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--color-muted);
   cursor: pointer;
+  white-space: nowrap;
 }
 .tabs button.active {
   border-color: var(--color-primary);

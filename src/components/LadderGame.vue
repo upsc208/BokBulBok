@@ -144,6 +144,7 @@ function playGame() {
       phase.value = 'done';
       winnerName.value = names.value[winnerIdx];
       showPopup.value = true;
+      saveResult(winnerName.value, names.value);
     }
   }
   requestAnimationFrame(frame);
@@ -151,6 +152,18 @@ function playGame() {
 
 function closePopup() {
   showPopup.value = false;
+}
+
+async function saveResult(winner, participants) {
+  try {
+    await fetch('/api/coffee-result', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ winnerName: winner, participants })
+    });
+  } catch {
+    // 기록 저장 실패는 게임 진행에 영향 주지 않음
+  }
 }
 
 function pointsToStr(points) {

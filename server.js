@@ -1,15 +1,16 @@
 import express from 'express';
 import crypto from 'crypto';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initDb, run, all, get } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = process.env.PORT || 8080;
-const STORE_PATH = path.join(__dirname, 'data', 'store.json');
 const CLIENT_ID_RE = /^[a-zA-Z0-9-]{8,64}$/;
 const MAX_NAME_LEN = 30;
+
+await initDb();
 
 const app = express();
 app.use(express.json());
@@ -19,34 +20,18 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
-function loadStore() {
-  if (!fs.existsSync(STORE_PATH)) return {};
-  return JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
-}
-
-function saveStore(store) {
-  fs.mkdirSync(path.dirname(STORE_PATH), { recursive: true });
-  fs.writeFileSync(STORE_PATH, JSON.stringify(store, null, 2));
-}
-
-function getToday(store) {
-  const date = todayKey();
-  if (!store[date]) store[date] = { menus: [], votes: {} };
-  return { date, day: store[date] };
-}
-
-function withCounts(day) {
-  const counts = {};
-  for (const menuId of Object.values(day.votes)) {
-    counts[menuId] = (counts[menuId] || 0) + 1;
-  }
-  return day.menus.map((m) => ({ ...m, votes: counts[m.id] || 0 }));
+function menusWithVotes(date) {
+  return all(
+    `SELECT m.id as id, m.name as name,
+            (SELECT COUNT(*) FROM votes v WHERE v.menu_id = m.id AND v.date = m.date) as votes
+     FROM menus m WHERE m.date = ? ORDER BY m.name`,
+    [date]
+  );
 }
 
 app.get('/api/menus', (req, res) => {
-  const store = loadStore();
-  const { date, day } = getToday(store);
-  res.json({ date, menus: withCounts(day) });
+  const date = todayKey();
+  res.json({ date, menus: menusWithVotes(date) });
 });
 
 app.post('/api/menus', (req, res) => {
@@ -55,17 +40,13 @@ app.post('/api/menus', (req, res) => {
     return res.status(400).json({ error: 'invalid name' });
   }
 
-  const store = loadStore();
-  const { date, day } = getToday(store);
-
-  let menu = day.menus.find((m) => m.name.toLowerCase() === name.toLowerCase());
-  if (!menu) {
-    menu = { id: crypto.randomUUID(), name };
-    day.menus.push(menu);
-    saveStore(store);
+  const date = todayKey();
+  const existing = get(`SELECT id FROM menus WHERE date = ? AND LOWER(name) = LOWER(?)`, [date, name]);
+  if (!existing) {
+    run(`INSERT INTO menus (id, date, name) VALUES (?, ?, ?)`, [crypto.randomUUID(), date, name]);
   }
 
-  res.json({ date, menus: withCounts(day) });
+  res.json({ date, menus: menusWithVotes(date) });
 });
 
 app.get('/api/my-vote', (req, res) => {
@@ -73,9 +54,9 @@ app.get('/api/my-vote', (req, res) => {
   if (typeof clientId !== 'string' || !CLIENT_ID_RE.test(clientId)) {
     return res.json({ menuId: null });
   }
-  const store = loadStore();
-  const { day } = getToday(store);
-  res.json({ menuId: day.votes[clientId] || null });
+  const date = todayKey();
+  const row = get(`SELECT menu_id as menuId FROM votes WHERE date = ? AND client_id = ?`, [date, clientId]);
+  res.json({ menuId: row ? row.menuId : null });
 });
 
 app.post('/api/vote', (req, res) => {
@@ -84,16 +65,69 @@ app.post('/api/vote', (req, res) => {
     return res.status(400).json({ error: 'invalid clientId' });
   }
 
-  const store = loadStore();
-  const { date, day } = getToday(store);
-  if (!day.menus.some((m) => m.id === menuId)) {
+  const date = todayKey();
+  const menu = get(`SELECT id FROM menus WHERE id = ? AND date = ?`, [menuId, date]);
+  if (!menu) {
     return res.status(400).json({ error: 'invalid menuId' });
   }
 
-  day.votes[clientId] = menuId;
-  saveStore(store);
+  run(
+    `INSERT INTO votes (date, client_id, menu_id) VALUES (?, ?, ?)
+     ON CONFLICT(date, client_id) DO UPDATE SET menu_id = excluded.menu_id`,
+    [date, clientId, menuId]
+  );
 
-  res.json({ date, menus: withCounts(day) });
+  res.json({ date, menus: menusWithVotes(date) });
+});
+
+app.post('/api/coffee-result', (req, res) => {
+  const winnerName = typeof req.body?.winnerName === 'string' ? req.body.winnerName.trim() : '';
+  const participants = Array.isArray(req.body?.participants)
+    ? req.body.participants.filter((p) => typeof p === 'string').slice(0, 50)
+    : [];
+
+  if (!winnerName || winnerName.length > MAX_NAME_LEN || participants.length < 2) {
+    return res.status(400).json({ error: 'invalid payload' });
+  }
+
+  run(
+    `INSERT INTO coffee_results (date, winner_name, participants, created_at) VALUES (?, ?, ?, ?)`,
+    [todayKey(), winnerName, JSON.stringify(participants), new Date().toISOString()]
+  );
+
+  res.json({ ok: true });
+});
+
+app.get('/api/history', (req, res) => {
+  const year = parseInt(req.query.year, 10);
+  const month = parseInt(req.query.month, 10); // 1-12
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return res.status(400).json({ error: 'invalid year/month' });
+  }
+  const prefix = `${year}-${String(month).padStart(2, '0')}%`;
+
+  const menuRows = all(
+    `SELECT m.date as date, m.name as name,
+            (SELECT COUNT(*) FROM votes v WHERE v.menu_id = m.id AND v.date = m.date) as votes
+     FROM menus m WHERE m.date LIKE ? ORDER BY m.date, votes DESC`,
+    [prefix]
+  );
+  const coffeeRows = all(
+    `SELECT date, winner_name as winnerName FROM coffee_results WHERE date LIKE ? ORDER BY date, created_at`,
+    [prefix]
+  );
+
+  const history = {};
+  for (const row of menuRows) {
+    if (!history[row.date]) history[row.date] = { menus: [], coffeeWinners: [] };
+    history[row.date].menus.push({ name: row.name, votes: row.votes });
+  }
+  for (const row of coffeeRows) {
+    if (!history[row.date]) history[row.date] = { menus: [], coffeeWinners: [] };
+    history[row.date].coffeeWinners.push(row.winnerName);
+  }
+
+  res.json({ history });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
