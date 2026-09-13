@@ -1,21 +1,24 @@
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref } from 'vue';
 
-const names = ref(['철수', '영희', '민수']);
+const names = ref([]);
 const newName = ref('');
-const started = ref(false);
-const rungs = ref([]); // rungs[row][col] = true if a rung connects col and col+1
+const phase = ref('edit'); // 'edit' | 'ready' | 'playing' | 'done'
+const rungs = ref([]);
 const rows = ref(0);
 const outcomeIndex = ref(0);
-const revealed = reactive({}); // { [startIndex]: { points, finalCol } }
+const tokenPos = ref([]); // [[x,y], ...] per name
+const revealedPaths = ref([]); // path per name, filled once game has been played
+const winnerName = ref('');
+const showPopup = ref(false);
 
 const COL_WIDTH = 64;
 const ROW_HEIGHT = 26;
 const TOP_MARGIN = 34;
 const BOTTOM_MARGIN = 34;
 
-const svgWidth = computed(() => names.value.length * COL_WIDTH);
-const svgHeight = computed(() => TOP_MARGIN + rows.value * ROW_HEIGHT + BOTTOM_MARGIN);
+const svgWidth = () => names.value.length * COL_WIDTH;
+const svgHeight = () => TOP_MARGIN + rows.value * ROW_HEIGHT + BOTTOM_MARGIN;
 
 function x(col) {
   return col * COL_WIDTH + COL_WIDTH / 2;
@@ -50,23 +53,25 @@ function generateRungs(n, rowCount) {
   return grid;
 }
 
-function startLadder() {
+function setupLadder() {
   const n = names.value.length;
   if (n < 2) return;
   rows.value = Math.min(Math.max(n * 3, 8), 20);
   rungs.value = generateRungs(n, rows.value);
   outcomeIndex.value = Math.floor(Math.random() * n);
-  for (const key of Object.keys(revealed)) delete revealed[key];
-  started.value = true;
+  tokenPos.value = names.value.map((_, i) => [x(i), y(0)]);
+  revealedPaths.value = [];
+  winnerName.value = '';
+  showPopup.value = false;
+  phase.value = 'ready';
 }
 
 function reshuffle() {
-  startLadder();
+  setupLadder();
 }
 
 function editNames() {
-  started.value = false;
-  for (const key of Object.keys(revealed)) delete revealed[key];
+  phase.value = 'edit';
 }
 
 function tracePath(startCol) {
@@ -88,30 +93,77 @@ function tracePath(startCol) {
   return { points, finalCol: col };
 }
 
-function reveal(i) {
-  if (revealed[i]) return;
-  revealed[i] = tracePath(i);
+function pointAt(points, t) {
+  const segLens = [];
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const dx = points[i + 1][0] - points[i][0];
+    const dy = points[i + 1][1] - points[i][1];
+    const len = Math.hypot(dx, dy);
+    segLens.push(len);
+    total += len;
+  }
+  if (total === 0) return points[0];
+  const target = t * total;
+  let acc = 0;
+  for (let i = 0; i < segLens.length; i++) {
+    if (acc + segLens[i] >= target) {
+      const segT = segLens[i] === 0 ? 0 : (target - acc) / segLens[i];
+      return [
+        points[i][0] + (points[i + 1][0] - points[i][0]) * segT,
+        points[i][1] + (points[i + 1][1] - points[i][1]) * segT
+      ];
+    }
+    acc += segLens[i];
+  }
+  return points[points.length - 1];
 }
-function revealAll() {
-  names.value.forEach((_, i) => reveal(i));
+
+function easeInOutQuad(t) {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+function playGame() {
+  if (phase.value !== 'ready') return;
+  phase.value = 'playing';
+
+  const paths = names.value.map((_, i) => tracePath(i));
+  const winnerIdx = paths.findIndex((p) => p.finalCol === outcomeIndex.value);
+  const duration = Math.max(2200, rows.value * 260);
+  const start = performance.now();
+
+  function frame(now) {
+    const elapsed = now - start;
+    const t = Math.min(elapsed / duration, 1);
+    const eased = easeInOutQuad(t);
+    tokenPos.value = paths.map((p) => pointAt(p.points, eased));
+    if (t < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      revealedPaths.value = paths;
+      phase.value = 'done';
+      winnerName.value = names.value[winnerIdx];
+      showPopup.value = true;
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function closePopup() {
+  showPopup.value = false;
 }
 
 function pointsToStr(points) {
   return points.map((p) => p.join(',')).join(' ');
 }
 function colorFor(i) {
-  return `hsl(${(i * 67) % 360}, 70%, 45%)`;
-}
-function resultLabel(i) {
-  const r = revealed[i];
-  if (!r) return '';
-  return r.finalCol === outcomeIndex.value ? '☕ 커피 당첨' : '통과';
+  return `hsl(${(i * 67) % 360}, 65%, 42%)`;
 }
 </script>
 
 <template>
   <div>
-    <div v-if="!started">
+    <div v-if="phase === 'edit'">
       <p class="hint">커피값 낼 사람을 정해요. 이름을 입력하고 2명 이상 모이면 시작할 수 있어요.</p>
       <div class="add-row">
         <input
@@ -128,25 +180,24 @@ function resultLabel(i) {
           {{ n }} <button class="remove" @click="removeName(i)">×</button>
         </span>
       </div>
-      <button class="start-btn" :disabled="names.length < 2" @click="startLadder">
-        사다리 타기 시작 ({{ names.length }}명)
+      <button class="big-btn" :disabled="names.length < 2" @click="setupLadder">
+        사다리 만들기 ({{ names.length }}명)
       </button>
     </div>
 
     <div v-else>
       <div class="actions">
-        <button @click="revealAll">전체 결과 공개</button>
-        <button @click="reshuffle">다시 섞기</button>
-        <button @click="editNames">이름 다시 입력</button>
+        <button :disabled="phase === 'playing'" @click="reshuffle">다시 섞기</button>
+        <button :disabled="phase === 'playing'" @click="editNames">이름 다시 입력</button>
       </div>
 
       <div class="ladder-wrap">
-        <svg :viewBox="`0 0 ${svgWidth} ${svgHeight}`" :width="svgWidth" class="ladder-svg">
+        <svg :viewBox="`0 0 ${svgWidth()} ${svgHeight()}`" :width="svgWidth()" class="ladder-svg">
           <line
             v-for="(n, col) in names"
             :key="'v' + col"
             :x1="x(col)" :y1="y(0)" :x2="x(col)" :y2="y(rows)"
-            stroke="#ccc" stroke-width="2"
+            stroke="#f0ddc9" stroke-width="2"
           />
           <template v-for="(row, r) in rungs" :key="'r' + r">
             <line
@@ -155,18 +206,19 @@ function resultLabel(i) {
               :key="'rung' + r + '-' + c"
               :x1="x(c)" :y1="y(r) + ROW_HEIGHT / 2"
               :x2="x(c + 1)" :y2="y(r) + ROW_HEIGHT / 2"
-              stroke="#ccc" stroke-width="2"
+              stroke="#f0ddc9" stroke-width="2"
             />
           </template>
 
           <polyline
-            v-for="(path, i) in revealed"
+            v-for="(path, i) in revealedPaths"
             :key="'path' + i"
             :points="pointsToStr(path.points)"
             fill="none"
             :stroke="colorFor(i)"
-            stroke-width="3"
+            stroke-width="2.5"
             stroke-linecap="round"
+            opacity="0.55"
           />
 
           <text
@@ -175,50 +227,68 @@ function resultLabel(i) {
             :x="x(col)" :y="18"
             text-anchor="middle"
             font-size="12"
-            :fill="revealed[col] ? colorFor(col) : '#333'"
-            style="cursor:pointer; font-weight:600"
-            @click="reveal(col)"
+            :fill="colorFor(col)"
+            font-weight="600"
           >{{ n }}</text>
 
           <text
             v-for="(n, col) in names"
             :key="'outcome' + col"
-            :x="x(col)" :y="svgHeight - 10"
+            :x="x(col)" :y="svgHeight() - 10"
             text-anchor="middle"
             font-size="12"
-            :fill="col === outcomeIndex ? '#e0521f' : '#999'"
+            :fill="col === outcomeIndex ? 'var(--color-danger)' : 'var(--color-muted)'"
             font-weight="600"
           >{{ col === outcomeIndex ? '☕ 커피' : '통과' }}</text>
+
+          <circle
+            v-for="(pos, i) in tokenPos"
+            :key="'token' + i"
+            :cx="pos[0]" :cy="pos[1]" r="5"
+            :fill="colorFor(i)"
+            stroke="#fff" stroke-width="1.5"
+          />
         </svg>
       </div>
 
-      <p class="tip">이름을 눌러서 결과를 확인하세요.</p>
+      <button
+        class="big-btn play-btn"
+        :disabled="phase === 'playing'"
+        @click="phase === 'done' ? reshuffle() : playGame()"
+      >
+        {{ phase === 'ready' ? '시작' : phase === 'playing' ? '내려가는 중...' : '다시 하기' }}
+      </button>
+    </div>
 
-      <div v-if="Object.keys(revealed).length" class="results">
-        <div v-for="(path, i) in revealed" :key="'result' + i" class="result-row">
-          <span :style="{ color: colorFor(i) }">{{ names[i] }}</span>
-          <span :class="{ hit: path.finalCol === outcomeIndex }">{{ resultLabel(i) }}</span>
-        </div>
+    <div v-if="showPopup" class="popup-backdrop" @click.self="closePopup">
+      <div class="popup">
+        <div class="popup-emoji">☕</div>
+        <div class="popup-title">오늘의 당첨자</div>
+        <div class="popup-name">{{ winnerName }}</div>
+        <div class="popup-sub">커피는 {{ winnerName }}님이 쏩니다 🎉</div>
+        <button class="big-btn" @click="closePopup">확인</button>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.hint { color: #666; font-size: 14px; margin-bottom: 16px; }
+.hint { color: var(--color-muted); font-size: 14px; margin-bottom: 16px; }
 .add-row { display: flex; gap: 8px; margin-bottom: 14px; }
 .add-row input {
   flex: 1;
   padding: 12px 14px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   font-size: 15px;
+  background: var(--color-surface);
+  color: var(--color-text);
 }
-.add-row button, .start-btn, .actions button {
+.add-row button {
   padding: 12px 16px;
   border: none;
   border-radius: 10px;
-  background: #2f6fed;
+  background: var(--color-primary);
   color: #fff;
   font-size: 14px;
   font-weight: 500;
@@ -226,8 +296,8 @@ function resultLabel(i) {
 }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .chip {
-  background: #eef3ff;
-  color: #2f6fed;
+  background: var(--color-selected-bg);
+  color: var(--color-primary-dark);
   border-radius: 999px;
   padding: 6px 10px 6px 14px;
   font-size: 14px;
@@ -238,34 +308,72 @@ function resultLabel(i) {
 .chip .remove {
   border: none;
   background: none;
-  color: #2f6fed;
+  color: var(--color-primary-dark);
   font-size: 16px;
   cursor: pointer;
   padding: 0 4px;
 }
-.start-btn { width: 100%; }
-.start-btn:disabled { background: #aac0ee; cursor: default; }
+.big-btn {
+  width: 100%;
+  padding: 16px;
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(232, 89, 12, 0.35);
+}
+.big-btn:disabled {
+  background: var(--color-primary-light);
+  box-shadow: none;
+  cursor: default;
+}
+.play-btn { margin-top: 16px; }
 .actions { display: flex; gap: 8px; margin-bottom: 16px; }
-.actions button { flex: 1; background: #fff; color: #2f6fed; border: 1px solid #2f6fed; }
+.actions button {
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-primary-dark);
+  border: 1px solid var(--color-primary-light);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.actions button:disabled { opacity: 0.5; cursor: default; }
 .ladder-wrap {
   overflow-x: auto;
-  background: #fff;
-  border: 1px solid #e5e5e5;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 8px 0;
 }
 .ladder-svg { display: block; margin: 0 auto; }
-.tip { text-align: center; color: #999; font-size: 12px; margin: 10px 0; }
-.results { margin-top: 12px; }
-.result-row {
+
+.popup-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(59, 42, 30, 0.45);
   display: flex;
-  justify-content: space-between;
-  padding: 8px 12px;
-  background: #fff;
-  border: 1px solid #eee;
-  border-radius: 8px;
-  margin-bottom: 6px;
-  font-size: 14px;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
 }
-.result-row .hit { color: #e0521f; font-weight: 700; }
+.popup {
+  background: var(--color-surface);
+  border-radius: 18px;
+  padding: 32px 24px;
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+}
+.popup-emoji { font-size: 40px; margin-bottom: 8px; }
+.popup-title { font-size: 14px; color: var(--color-muted); font-weight: 600; }
+.popup-name { font-size: 28px; font-weight: 800; color: var(--color-primary-dark); margin: 8px 0; }
+.popup-sub { font-size: 14px; color: var(--color-text); margin-bottom: 20px; }
 </style>

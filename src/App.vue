@@ -32,17 +32,17 @@ const tab = ref('vote');
 .tabs button {
   flex: 1;
   padding: 12px 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--color-surface);
   font-size: 14px;
   font-weight: 600;
-  color: #666;
+  color: var(--color-muted);
   cursor: pointer;
 }
 .tabs button.active {
-  border-color: #2f6fed;
-  background: #2f6fed;
+  border-color: var(--color-primary);
+  background: var(--color-primary);
   color: #fff;
 }
 </style>

@@ -117,45 +117,47 @@ onUnmounted(() => clearInterval(timer));
 </template>
 
 <style scoped>
-.date { color: #888; font-size: 13px; margin-bottom: 20px; }
+.date { color: var(--color-muted); font-size: 13px; margin-bottom: 20px; }
 .add-row { display: flex; gap: 8px; margin-bottom: 20px; }
 .add-row input {
   flex: 1;
   padding: 12px 14px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   font-size: 15px;
+  background: var(--color-surface);
+  color: var(--color-text);
 }
 .add-row button {
   padding: 12px 16px;
   border: none;
   border-radius: 10px;
-  background: #2f6fed;
+  background: var(--color-primary);
   color: #fff;
   font-size: 15px;
   font-weight: 500;
   cursor: pointer;
 }
-.add-row button:disabled { background: #aac0ee; cursor: default; }
+.add-row button:disabled { background: var(--color-primary-light); cursor: default; }
 .menu-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #fff;
-  border: 1px solid #e5e5e5;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 14px 16px;
   margin-bottom: 10px;
   cursor: pointer;
   transition: border-color .15s, background .15s;
 }
-.menu-item:hover { border-color: #bbb; }
-.menu-item.selected { border-color: #2f6fed; background: #eef3ff; }
+.menu-item:hover { border-color: var(--color-primary-light); }
+.menu-item.selected { border-color: var(--color-primary); background: var(--color-selected-bg); }
 .row { display: flex; justify-content: space-between; }
 .menu-name { font-size: 16px; font-weight: 500; }
-.menu-votes { font-size: 14px; color: #666; }
-.bar-track { background: #eee; border-radius: 2px; margin-top: 8px; }
-.bar { height: 4px; background: #2f6fed; border-radius: 2px; transition: width .2s; }
-.empty { color: #999; font-size: 14px; text-align: center; padding: 24px 0; }
-.footer { text-align: center; color: #aaa; font-size: 12px; margin-top: 24px; }
+.menu-votes { font-size: 14px; color: var(--color-muted); }
+.bar-track { background: var(--color-border); border-radius: 2px; margin-top: 8px; }
+.bar { height: 4px; background: var(--color-primary); border-radius: 2px; transition: width .2s; }
+.empty { color: var(--color-muted); font-size: 14px; text-align: center; padding: 24px 0; }
+.footer { text-align: center; color: var(--color-muted); font-size: 12px; margin-top: 24px; }
 </style>
