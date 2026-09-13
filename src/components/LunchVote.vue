@@ -49,6 +49,12 @@ async function vote(menuId) {
   await loadMenus();
 }
 
+async function removeMenu(menuId) {
+  await fetch('/api/menus/' + encodeURIComponent(menuId), { method: 'DELETE' });
+  if (myVote.value === menuId) myVote.value = null;
+  await loadMenus();
+}
+
 async function addMenu() {
   const name = newMenuName.value.trim();
   if (!name) return;
@@ -110,6 +116,7 @@ onUnmounted(() => clearInterval(timer));
         </div>
         <div class="bar-track"><div class="bar" :style="{ width: pct(m) + '%' }"></div></div>
       </div>
+      <button class="remove-btn" @click.stop="removeMenu(m.id)">×</button>
     </div>
 
     <div class="footer">한 사람당 하루 한 표, 다시 누르면 변경돼요</div>
@@ -158,6 +165,18 @@ onUnmounted(() => clearInterval(timer));
 .menu-votes { font-size: 14px; color: var(--color-muted); }
 .bar-track { background: var(--color-border); border-radius: 2px; margin-top: 8px; }
 .bar { height: 4px; background: var(--color-primary); border-radius: 2px; transition: width .2s; }
+.remove-btn {
+  border: none;
+  background: none;
+  color: var(--color-muted);
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px 6px;
+  margin-left: 8px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.remove-btn:hover { color: var(--color-danger); background: var(--color-selected-bg); }
 .empty { color: var(--color-muted); font-size: 14px; text-align: center; padding: 24px 0; }
 .footer { text-align: center; color: var(--color-muted); font-size: 12px; margin-top: 24px; }
 </style>

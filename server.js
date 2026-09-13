@@ -49,6 +49,19 @@ app.post('/api/menus', (req, res) => {
   res.json({ date, menus: menusWithVotes(date) });
 });
 
+app.delete('/api/menus/:id', (req, res) => {
+  const date = todayKey();
+  const menu = get(`SELECT id FROM menus WHERE id = ? AND date = ?`, [req.params.id, date]);
+  if (!menu) {
+    return res.status(404).json({ error: 'not found' });
+  }
+
+  run(`DELETE FROM votes WHERE menu_id = ? AND date = ?`, [req.params.id, date]);
+  run(`DELETE FROM menus WHERE id = ? AND date = ?`, [req.params.id, date]);
+
+  res.json({ date, menus: menusWithVotes(date) });
+});
+
 app.get('/api/my-vote', (req, res) => {
   const clientId = req.query.clientId;
   if (typeof clientId !== 'string' || !CLIENT_ID_RE.test(clientId)) {
